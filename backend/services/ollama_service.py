@@ -92,5 +92,12 @@ def check_spacing(content: str, model: str) -> dict[str, Any]:
     except (json.JSONDecodeError, KeyError) as e:
         logger.warning("[ollama] 응답 파싱 실패: %s", e)
         return {"errors": [], "corrected_text": content, "error_count": 0, "parse_error": str(e)}
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ConnectionError(
+                f"Ollama 모델 '{model}'을 찾을 수 없습니다. "
+                f"'ollama pull {model}' 명령으로 먼저 설치하세요."
+            ) from e
+        raise ConnectionError(f"Ollama 서버 오류: HTTP {e.code}") from e
     except urllib.error.URLError as e:
-        raise ConnectionError(f"Ollama 연결 실패: {e}") from e
+        raise ConnectionError(f"Ollama 연결 실패: {e.reason}") from e
