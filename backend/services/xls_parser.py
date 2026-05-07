@@ -243,11 +243,8 @@ def _student_key(
 
 
 def _iter_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
-    """DataFrame 의 각 행을 dict 로 변환 (인덱스 무시)."""
-    out = []
-    for _, row in df.iterrows():
-        out.append({k: row.get(k) for k in df.columns})
-    return out
+    """DataFrame 의 각 행을 dict 로 변환 — to_dict('records')가 iterrows()보다 ~100배 빠름."""
+    return df.to_dict("records")
 
 
 def _parse_generic(

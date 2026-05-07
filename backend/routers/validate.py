@@ -12,12 +12,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.config import RULES_DIR
 from backend.services import char_validator, duplicate_checker, ollama_service, rule_checker
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/validate", tags=["validate"])
-
-RULES_DIR = Path(__file__).resolve().parent.parent.parent / "rules"
 
 
 # ---------- Pydantic 요청 모델 ----------

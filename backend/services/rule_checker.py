@@ -7,11 +7,10 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+from backend.config import RULES_DIR
 from backend.database import get_connection
 
 logger = logging.getLogger(__name__)
-
-RULES_DIR = Path(__file__).resolve().parent.parent.parent / "rules"
 
 AREA_LABEL = {
     "subject_details": "세부능력및특기사항",

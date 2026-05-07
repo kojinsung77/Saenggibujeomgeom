@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import API_KEY_FILE, LOG_DIR, UPLOAD_DIR
+from backend.config import API_KEY_FILE, FRONTEND_DIR, LOG_DIR, UPLOAD_DIR
 from backend.database import init_db
 from backend.routers import export, inspect, students, upload, validate
 from backend import state
@@ -102,6 +102,5 @@ def healthz():
 
 
 # 2) 정적 파일 마운트 (마지막)
-frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
-if frontend_dir.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

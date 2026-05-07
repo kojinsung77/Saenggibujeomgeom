@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-from backend.config import DB_PATH
+from backend.config import DB_PATH, SCHEMA_PATH
 
 
 DEFAULT_PROMPT = """당신은 학교생활기록부 기재요령 전문가입니다.
@@ -47,8 +47,7 @@ def get_connection() -> sqlite3.Connection:
 def init_db() -> None:
     """Apply schema.sql (idempotent) and seed default system prompt if missing."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    schema_path = Path(__file__).parent / "db" / "schema.sql"
-    schema_sql = schema_path.read_text(encoding="utf-8")
+    schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn = get_connection()
     try:
         conn.executescript(schema_sql)
