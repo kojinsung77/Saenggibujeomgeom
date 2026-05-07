@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 
 # 표준 키 -> 후보 컬럼명 (정규화 후 매칭)
 COLUMN_MAPS: dict[str, list[str]] = {
-    # NEIS XLS에서 '학년' 컬럼은 '기록학년(record_grade)'을 의미한다.
-    # 현재 학년(current_grade)은 파일 상단 헤더 셀(예: "1학년 3반")에서 추출.
+    # NEIS XLS의 '학년' 컬럼은 기록학년(grade_year)을 의미한다.
+    # 현재 학년(grade)은 파일 상단 헤더 셀 "X학년 Y반"에서 _extract_class_info로 추출한다.
+    # grade_year를 먼저 처리해 '학년' 컬럼을 선점하면,
+    # grade 매핑이 실패해 fallback_grade(현재 학년)를 올바르게 사용한다.
     "grade_year": ["학년", "학년도", "기록학년"],
-    # 현재 학년(current_grade)은 _extract_class_info로 fallback 처리되므로
-    # 컬럼 매핑 시 grade는 grade_year와 동일하게 처리한다.
-    "grade": ["학년", "학년도"],
+    "grade": ["학년", "학년도"],          # grade_year가 선점 후 남은 컬럼으로 매핑됨
     "class_no": ["반"],
     "number": ["번호", "번"],
     "name": ["성명", "이름"],
@@ -73,13 +73,13 @@ def _extract_class_info(raw: pd.DataFrame) -> tuple[Optional[int], Optional[int]
     """NEIS XLS 헤더 셀(예: '1학년 3반 교과학습발달상황')에서 현재 학년/반 추출.
 
     NEIS 출력 파일은 데이터 행에 '반' 컬럼이 없고, 파일 상단(보통 2~4행)
-    첫 번째 셀에 'X학년 Y반' 패턴으로 현재 반 정보가 기입된다.
-    이 함수는 그 패턴을 찾아 (current_grade, current_class)를 반환한다.
+    어딘가의 셀에 'X학년 Y반' 패턴으로 현재 반 정보가 기입된다.
+    영역별 파일마다 셀 위치가 다르므로 전체 상단 영역을 스캔한다.
     """
-    scan_limit = min(6, len(raw))
-    for i in range(scan_limit):
-        col_limit = min(5, len(raw.columns))
-        for j in range(col_limit):
+    scan_rows = min(10, len(raw))
+    scan_cols = len(raw.columns)  # 모든 열 스캔 (세특 등은 학년/반 셀이 우측에 있음)
+    for i in range(scan_rows):
+        for j in range(scan_cols):
             val = raw.iloc[i, j]
             if val is None:
                 continue
@@ -135,6 +135,45 @@ def read_with_header_autodetect(
 
     df = pd.read_excel(path, header=header_row, engine=engine, sheet_name=sheet, dtype=object)
     df.columns = [str(c) for c in df.columns]
+
+    # NEIS 창체 등은 이중 헤더를 사용한다:
+    #   header_row  : 번 호 | 성  명 | 학년 | 창의적체험활동 | (empty) | (empty)
+    #   header_row+1: (empty) | (empty) | 영역 | (empty) | 시간 | 특기사항
+    # pandas는 header_row의 빈 셀을 "Unnamed: N"으로 만들고 header_row+1이
+    # 데이터 첫 행으로 들어가 content/area 등 매핑이 실패한다.
+    # 안전 조건: '번 호' 컬럼이 첫 행에서 NaN인 경우(= 실제 학생 번호가 없는 경우)만
+    # 서브헤더 행으로 인정해 Unnamed 열의 이름을 보완한다.
+    if len(df) > 0 and any(c.startswith("Unnamed:") for c in df.columns):
+        num_col = next(
+            (c for c in df.columns if _norm(c) in ("번호", "번")),
+            None,
+        )
+        first_val = df.iloc[0][num_col] if num_col else None
+        first_row_is_subheader = first_val is None or (
+            isinstance(first_val, float) and pd.isna(first_val)
+        ) or str(first_val).strip() in ("", "nan")
+
+        if first_row_is_subheader:
+            sub = df.iloc[0]
+            rename: dict[str, str] = {}
+            for col in df.columns:
+                if not col.startswith("Unnamed:"):
+                    continue
+                v = sub[col]
+                if v is None:
+                    continue
+                try:
+                    if isinstance(v, float) and pd.isna(v):
+                        continue
+                except Exception:
+                    pass
+                s = str(v).strip()
+                if s and s != "nan" and len(s) <= 20:
+                    rename[col] = s
+            if rename:
+                df = df.rename(columns=rename)
+                logger.info("[xls_parser] 이중헤더 탐지 — 서브헤더 행에서 컬럼명 보완: %s", list(rename.values()))
+
     return df, current_grade, current_class
 
 
@@ -148,6 +187,10 @@ def normalize_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str], l
     for orig in df.columns:
         norm_to_orig[_norm(orig)] = orig
 
+    # 학생 식별 키는 오탐지 방지를 위해 정확 일치만 허용한다.
+    # 예: "누계시간(학년별)"이 부분 일치로 grade에 매핑되는 오류를 방지.
+    EXACT_ONLY_KEYS = {"grade", "class_no", "number", "name"}
+
     mapping: dict[str, str] = {}
     used_orig: set[str] = set()
     for std_key, candidates in COLUMN_MAPS.items():
@@ -159,7 +202,9 @@ def normalize_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str], l
                 used_orig.add(norm_to_orig[n])
                 break
         else:
-            # 부분 일치 fallback
+            if std_key in EXACT_ONLY_KEYS:
+                continue  # 학생 식별 키는 부분 일치 시도 안 함
+            # 부분 일치 fallback (content, area 등 기술 컬럼에만 적용)
             for n_orig, orig in norm_to_orig.items():
                 if orig in used_orig:
                     continue
@@ -265,6 +310,15 @@ def _parse_generic(
 
     if current_grade or current_class:
         logger.info("[xls_parser:%s] 파일 헤더 셀에서 현재 학년/반 추출: %s학년 %s반", area, current_grade, current_class)
+    else:
+        logger.warning("[xls_parser:%s] 학년/반 추출 실패 — fallback 없음. 데이터 행에 학년/반 컬럼이 있어야 합니다.", area)
+
+    # NEIS XLS는 번호·성명이 병합 셀로 돼 있어 첫 행만 값이 있고
+    # 이후 행은 NaN이 된다. forward-fill 로 빈 칸을 채워 파싱 누락을 방지한다.
+    # grade/class_no 는 fallback_grade/fallback_class 로 채우므로 ffill 제외.
+    for col in ("number", "name"):
+        if col in df.columns:
+            df[col] = df[col].ffill()
 
     warnings: list[str] = []
     # class_no는 NEIS XLS 파일 헤더 셀에서 fallback으로 채울 수 있으므로 필수 아님
@@ -322,15 +376,24 @@ def parse_subject_grades(path: str | Path) -> dict[str, Any]:
     )
     norm_rows = []
     for r in res["rows"]:
+        subject = _to_str(r.get("subject"))
+        original_score = _to_float(r.get("original_score"))
+        achievement = _to_str(r.get("achievement"))
+        rank_grade = _to_str(r.get("rank_grade"))
+        # 과목·성적이 모두 없으면 파일 말미 빈/요약 행 — ffill 산물이므로 스킵.
+        # 이 필터 없이는 마지막 학생(예: '하늘') 이름이 뒤따르는 빈 행에도
+        # ffill 돼 유령 학생(동일 번호, 다른 이름)이 생성된다.
+        if subject is None and original_score is None and achievement is None and rank_grade is None:
+            continue
         norm_rows.append({
             "grade": r["grade"],
             "class_no": r["class_no"],
             "number": r["number"],
             "name": r["name"],
-            "subject": _to_str(r.get("subject")),
-            "original_score": _to_float(r.get("original_score")),
-            "achievement": _to_str(r.get("achievement")),
-            "rank_grade": _to_str(r.get("rank_grade")),
+            "subject": subject,
+            "original_score": original_score,
+            "achievement": achievement,
+            "rank_grade": rank_grade,
             "semester": _to_int(r.get("semester")),
             "grade_year": _to_int(r.get("grade_year")) or r["grade"],
         })

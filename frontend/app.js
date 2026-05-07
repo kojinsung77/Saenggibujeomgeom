@@ -120,7 +120,11 @@ function showToast(message, kind = 'info', duration = 3800) {
 
 /* -------------------- 공통 fetch 래퍼 -------------------- */
 async function api(method, url, body, opts = {}) {
-  const init = { method, headers: {} };
+  const timeoutMs = opts.timeout ?? 300_000; // 기본 5분 (DB 구축 등 오래 걸리는 작업 대비)
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const init = { method, headers: {}, signal: controller.signal };
   if (body !== undefined) {
     if (body instanceof FormData) {
       init.body = body; // Content-Type 자동
@@ -129,7 +133,12 @@ async function api(method, url, body, opts = {}) {
       init.body = JSON.stringify(body);
     }
   }
-  const res = await fetch(url, init);
+  let res;
+  try {
+    res = await fetch(url, init);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     let msg = `${method} ${url} 실패 (HTTP ${res.status})`;
     try {

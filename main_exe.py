@@ -14,8 +14,18 @@ from backend.main import app  # 문자열 대신 직접 import (frozen exe 호�
 
 
 def _open_browser() -> None:
-    time.sleep(3)
-    webbrowser.open("http://127.0.0.1:8000")
+    """서버가 실제로 응답할 때까지 기다린 후 브라우저를 열어 준다.
+    PyInstaller 압축 해제 시간(최대 30초)을 감안한다."""
+    import urllib.request
+    url = "http://127.0.0.1:8000"
+    for _ in range(60):          # 최대 60초 대기
+        time.sleep(1)
+        try:
+            urllib.request.urlopen(url, timeout=1)
+            break                # 응답 성공 → 즉시 브라우저 열기
+        except Exception:
+            pass
+    webbrowser.open(url)
 
 
 if __name__ == "__main__":
