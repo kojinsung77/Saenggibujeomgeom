@@ -4,7 +4,6 @@
 
 원본 데스크톱 exe 2종(`생기부_DB_생성기(v1.2).exe` + `생기부_AI_Inspector(v1.2).exe`)의 기능을 모두 반영하고 웹 환경의 편의 기능을 추가한 재구현 프로젝트. **구현 완료 상태** (v2.0, 2026-05-07).
 
-**원본 프로그램 제작:** 대전복수고등학교 박영준 교사
 **기술 스택:** Python FastAPI + SQLite + Google Gemini API + Ollama(로컬) + Vanilla JS
 **GitHub:** https://github.com/tigerjk9/school-life-record
 **실행:** `생기부점검_실행.bat` 더블클릭 → `http://127.0.0.1:8000`
