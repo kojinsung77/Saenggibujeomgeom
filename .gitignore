@@ -1,0 +1,34 @@
+# 데이터 (개인정보 보호)
+data/
+logs/
+_workspace/
+_extracted/
+
+# 원본 파일 (용량 큰 exe/pdf — git 제외)
+_original/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 에디터
+.vscode/
+.idea/
+*.swp
+
+# Claude Code / oh-my-claudecode 런타임 (포크 시 불필요)
+.omc/
+docs/.pdca-snapshots/
+docs/.pdca-status.json
+verify_*.py
