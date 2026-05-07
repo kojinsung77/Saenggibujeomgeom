@@ -13,10 +13,12 @@ __pycache__/
 *.pyo
 .env
 *.egg-info/
-dist/
-build/
 .venv/
 venv/
+
+# PyInstaller 빌드 결과물 (용량 크므로 git 제외)
+dist/
+build/
 
 # OS
 .DS_Store
