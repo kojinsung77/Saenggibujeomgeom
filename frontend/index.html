@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>생활기록부 점검</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="style.css?v=10">
+  <script>
+    (function(){
+      var t = localStorage.getItem('theme');
+      if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+      var p = localStorage.getItem('palette');
+      if (p && p !== 'green') document.documentElement.setAttribute('data-palette', p);
+    })();
+  </script>
+</head>
+<body>
+  <header id="app-header">
+    <div class="header-inner">
+      <div class="header-row">
+        <h1 class="app-title">생활기록부 점검</h1>
+        <div class="header-status">
+          <div id="db-status-badge" class="status-pill status-pill-muted" title="DB 상태">
+            <span class="status-dot"></span>
+            <span class="status-text">DB 미구축</span>
+          </div>
+          <div id="gemini-status-badge" class="status-pill status-pill-muted" title="Gemini 연결 상태">
+            <span class="status-dot"></span>
+            <span class="status-text">Gemini 미연결</span>
+          </div>
+          <div class="palette-wrap">
+            <button type="button" id="btn-palette" class="palette-btn" aria-label="색상 테마 선택" title="색상 테마 선택">🎨</button>
+            <div id="palette-popup" class="palette-popup" role="menu" aria-label="색상 팔레트">
+              <div class="palette-popup-title">색상 테마</div>
+              <div class="palette-swatches">
+                <div><button class="palette-swatch" data-palette="green"   style="background:oklch(38% 0.13 158)" title="초록"></button><div class="palette-label">초록</div></div>
+                <div><button class="palette-swatch" data-palette="pink"    style="background:oklch(48% 0.18 345)" title="핑크"></button><div class="palette-label">핑크</div></div>
+                <div><button class="palette-swatch" data-palette="lavender" style="background:oklch(48% 0.18 290)" title="라벤더"></button><div class="palette-label">라벤더</div></div>
+                <div><button class="palette-swatch" data-palette="sky"     style="background:oklch(50% 0.17 220)" title="하늘"></button><div class="palette-label">하늘</div></div>
+                <div><button class="palette-swatch" data-palette="peach"   style="background:oklch(55% 0.16 45)"  title="피치"></button><div class="palette-label">피치</div></div>
+                <div><button class="palette-swatch" data-palette="mint"    style="background:oklch(50% 0.16 175)" title="민트"></button><div class="palette-label">민트</div></div>
+                <div><button class="palette-swatch" data-palette="coral"   style="background:oklch(52% 0.17 22)"  title="산호"></button><div class="palette-label">산호</div></div>
+                <div><button class="palette-swatch" data-palette="lilac"   style="background:oklch(52% 0.16 270)" title="라일락"></button><div class="palette-label">라일락</div></div>
+                <div><button class="palette-swatch" data-palette="butter"  style="background:oklch(56% 0.14 90)"  title="버터"></button><div class="palette-label">버터</div></div>
+                <div><button class="palette-swatch" data-palette="rose"    style="background:oklch(50% 0.20 5)"   title="로즈"></button><div class="palette-label">로즈</div></div>
+              </div>
+            </div>
+          </div>
+          <button type="button" id="btn-theme-toggle" class="theme-toggle" aria-label="테마 전환" title="다크/라이트 모드 전환">
+            <span class="theme-icon-sun">☀</span>
+            <span class="theme-icon-moon">☽</span>
+          </button>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="주요 메뉴">
+        <a href="#upload" class="tab-link" role="tab" data-tab="upload">① 업로드</a>
+        <a href="#search" class="tab-link" role="tab" data-tab="search">② 학생 조회</a>
+        <a href="#inspect" class="tab-link" role="tab" data-tab="inspect">③ AI 점검</a>
+        <a href="#validate" class="tab-link" role="tab" data-tab="validate">④ 통합검사</a>
+        <a href="#results" class="tab-link" role="tab" data-tab="results">⑤ 결과 확인</a>
+        <a href="#guide" class="tab-link tab-link-guide" role="tab" data-tab="guide">사용 안내</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="app-main">
+    <!-- ===================== 탭 1: 업로드 ===================== -->
+    <section id="tab-upload" class="tab-panel" role="tabpanel" aria-labelledby="upload">
+      <div class="panel-header">
+        <h2 class="panel-title">XLS 파일 업로드</h2>
+        <p class="panel-subtitle">NEIS 학생부 항목별 조회로 받은 6종 XLS 파일을 업로드한 뒤 DB를 구축합니다.</p>
+      </div>
+
+      <div class="upload-grid" id="upload-grid">
+        <!-- 카드는 JS에서 동적 생성 -->
+      </div>
+
+      <div class="db-build-bar">
+        <div class="db-build-info">
+          <p class="db-build-hint" id="db-build-hint">교과성적(필수)을 먼저 업로드하세요.</p>
+        </div>
+        <button id="btn-db-build" class="btn btn-primary btn-md" disabled>
+          <span class="btn-label">DB 구축</span>
+          <span class="spinner" hidden></span>
+        </button>
+        <button id="btn-db-reset" class="btn btn-danger btn-md" title="모든 학생 및 점검 데이터를 삭제합니다">
+          <span class="btn-label">DB 초기화</span>
+          <span class="spinner" hidden></span>
+        </button>
+      </div>
+
+      <div id="db-build-result" class="db-build-result" hidden></div>
+    </section>
+
+    <!-- ===================== 탭 2: 학생 조회 ===================== -->
+    <section id="tab-search" class="tab-panel" role="tabpanel" aria-labelledby="search" hidden>
+      <div class="panel-header">
+        <h2 class="panel-title">학생 조회</h2>
+        <p class="panel-subtitle">학년/반/이름으로 학생을 검색하거나, 본문 키워드로 작성 내용을 찾습니다.</p>
+      </div>
+
+      <div class="filter-row">
+        <div class="filter-field">
+          <label for="filter-grade">학년</label>
+          <select id="filter-grade">
+            <option value="">전체</option>
+            <option value="1">1학년</option>
+            <option value="2">2학년</option>
+            <option value="3">3학년</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label for="filter-class">반</label>
+          <select id="filter-class">
+            <option value="">전체</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label for="filter-name">이름</label>
+          <input id="filter-name" type="text" placeholder="이름 일부" autocomplete="off">
+        </div>
+        <div class="filter-field filter-field-grow">
+          <label for="filter-keyword">내용 검색</label>
+          <input id="filter-keyword" type="text" placeholder="세특/창체/봉사/행특 본문 키워드" autocomplete="off">
+        </div>
+        <div class="filter-actions">
+          <button id="btn-search" class="btn btn-primary btn-sm">검색</button>
+          <button id="btn-search-reset" class="btn btn-secondary btn-sm">초기화</button>
+        </div>
+      </div>
+
+      <div id="search-mode-banner" class="info-banner" hidden></div>
+
+      <div class="table-wrap">
+        <table id="students-table" class="data-table">
+          <thead>
+            <tr>
+              <th>학년</th>
+              <th>반</th>
+              <th>번호</th>
+              <th>이름</th>
+              <th>세특</th>
+              <th>창체</th>
+              <th>봉사</th>
+              <th>행특</th>
+            </tr>
+          </thead>
+          <tbody id="students-tbody"></tbody>
+        </table>
+        <div id="students-empty" class="empty-state" hidden>
+          <p>조건에 해당하는 학생이 없습니다.</p>
+        </div>
+        <div id="students-loading" class="loading-state" hidden>학생 목록을 불러오는 중…</div>
+      </div>
+    </section>
+
+    <!-- ===================== 탭 3: AI 점검 ===================== -->
+    <section id="tab-inspect" class="tab-panel" role="tabpanel" aria-labelledby="inspect" hidden>
+      <div class="panel-header">
+        <h2 class="panel-title">AI 점검</h2>
+        <p class="panel-subtitle">Gemini 모델로 세특/창체/봉사/행특을 일괄 검사합니다.</p>
+      </div>
+
+      <div class="config-card">
+        <div class="config-row">
+          <div class="config-field config-field-grow">
+            <label for="api-key">Gemini API 키</label>
+            <input id="api-key" type="password" placeholder="AIza..." autocomplete="off">
+          </div>
+          <div class="config-actions">
+            <button id="btn-gemini-connect" class="btn btn-primary btn-sm">연결</button>
+          </div>
+          <div class="config-status">
+            <div id="gemini-conn-indicator" class="conn-indicator conn-indicator-off">
+              <span class="conn-dot"></span>
+              <span class="conn-text">미연결</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-row">
+          <div class="config-field">
+            <label for="model-select">모델</label>
+            <select id="model-select" disabled>
+              <option value="">먼저 연결하세요</option>
+            </select>
+          </div>
+          <div class="config-field">
+            <label for="batch-size">배치 크기</label>
+            <input id="batch-size" type="number" min="1" max="5" value="3">
+            <small class="field-hint">1~10건씩 묶어 호출합니다 (기본 3). 오류 잦으면 1로 낮추세요.</small>
+          </div>
+        </div>
+
+        <div class="config-row">
+          <div class="config-field">
+            <label class="block-label">점검 영역</label>
+            <div class="checkbox-group">
+              <label class="checkbox-pill">
+                <input type="checkbox" class="area-check" value="subject_details" checked>
+                <span>세특</span>
+              </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" class="area-check" value="creative_activities" checked>
+                <span>창체</span>
+              </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" class="area-check" value="volunteer_activities" checked>
+                <span>봉사</span>
+              </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" class="area-check" value="behavior_opinion" checked>
+                <span>행특</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-row">
+          <div class="config-field">
+            <label for="inspect-grade">학년 (선택)</label>
+            <select id="inspect-grade">
+              <option value="">전체</option>
+              <option value="1">1학년</option>
+              <option value="2">2학년</option>
+              <option value="3">3학년</option>
+            </select>
+          </div>
+          <div class="config-field">
+            <label for="inspect-class">반 (선택)</label>
+            <input id="inspect-class" type="number" min="1" max="20" placeholder="예: 3">
+          </div>
+        </div>
+
+        <div class="prompt-block">
+          <button id="btn-prompt-toggle" class="prompt-toggle" type="button" aria-expanded="false">
+            <span class="caret">▸</span>
+            <span>시스템 프롬프트</span>
+            <span id="prompt-updated" class="prompt-meta"></span>
+          </button>
+          <div id="prompt-body" class="prompt-body" hidden>
+            <textarea id="prompt-textarea" class="prompt-editor" rows="14" spellcheck="false"></textarea>
+            <div class="prompt-actions">
+              <button id="btn-prompt-save" class="btn btn-secondary btn-sm">프롬프트 저장</button>
+              <button id="btn-prompt-reload" class="btn btn-secondary btn-sm">다시 불러오기</button>
+              <button id="btn-prompt-reset" class="btn btn-secondary btn-sm" title="기본 프롬프트로 되돌립니다">기본값 복원</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-row config-row-end">
+          <button id="btn-inspect-start" class="btn btn-primary btn-md" disabled>검사 시작</button>
+          <button id="btn-inspect-cancel" class="btn btn-danger btn-md" hidden>검사 취소</button>
+        </div>
+      </div>
+
+      <div id="progress-card" class="progress-card" hidden>
+        <div class="progress-meta">
+          <span id="progress-status" class="progress-status">대기</span>
+          <span id="progress-text" class="progress-text">0 / 0건</span>
+        </div>
+        <div class="progress-bar">
+          <div id="progress-fill" class="progress-fill" style="width:0%"></div>
+        </div>
+        <div id="progress-current" class="progress-current"></div>
+      </div>
+
+      <div class="live-results">
+        <div class="panel-subhead">
+          <h3>라이브 결과 (위반)</h3>
+          <span id="live-count" class="muted">0건</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>학년반번</th>
+                <th>이름</th>
+                <th>영역</th>
+                <th>유형</th>
+                <th>사유</th>
+              </tr>
+            </thead>
+            <tbody id="live-tbody"></tbody>
+          </table>
+          <div id="live-empty" class="empty-state">
+            <p>아직 위반 결과가 없습니다.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 탭 4: 결과 확인 ===================== -->
+    <section id="tab-results" class="tab-panel" role="tabpanel" aria-labelledby="results" hidden>
+      <div class="panel-header">
+        <h2 class="panel-title">결과 확인</h2>
+        <p class="panel-subtitle">이전 검사 결과를 확인하고 Excel로 내보냅니다.</p>
+      </div>
+
+      <div class="results-toolbar">
+        <div class="filter-field filter-field-grow">
+          <label for="inspection-select">검사 이력</label>
+          <select id="inspection-select">
+            <option value="">검사 이력이 없습니다</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label class="block-label">필터</label>
+          <div class="radio-group" id="result-filter-group">
+            <label class="radio-pill"><input type="radio" name="result-filter" value="all" checked><span>전체</span></label>
+            <label class="radio-pill"><input type="radio" name="result-filter" value="violations"><span>위반만</span></label>
+            <label class="radio-pill"><input type="radio" name="result-filter" value="normals"><span>정상만</span></label>
+          </div>
+        </div>
+        <div class="filter-actions">
+          <button id="btn-results-reload" class="btn btn-secondary btn-sm">새로고침</button>
+          <button id="btn-results-export" class="btn btn-primary btn-sm" disabled>Excel 다운로드</button>
+        </div>
+      </div>
+
+      <div id="result-summary" class="summary-banner" hidden>
+        <div class="summary-item">
+          <span class="summary-label">위반</span>
+          <span class="summary-value summary-violation" id="summary-violations">0</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">정상</span>
+          <span class="summary-value" id="summary-normals">0</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">총 점검</span>
+          <span class="summary-value" id="summary-total">0</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">모델</span>
+          <span class="summary-value summary-meta" id="summary-model">-</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">시작</span>
+          <span class="summary-value summary-meta" id="summary-started">-</span>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="results-table" class="data-table">
+          <thead>
+            <tr>
+              <th>학생</th>
+              <th>학년반</th>
+              <th>영역</th>
+              <th>위반</th>
+              <th>유형</th>
+              <th>내용 미리보기</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+        <div id="results-empty" class="empty-state" hidden>
+          <p>표시할 결과가 없습니다.</p>
+        </div>
+        <div id="results-loading" class="loading-state" hidden>결과를 불러오는 중…</div>
+      </div>
+    </section>
+
+    <!-- ===================== 탭 5: 사용 안내 ===================== -->
+    <section id="tab-guide" class="tab-panel" role="tabpanel" aria-labelledby="guide" hidden>
+      <div class="guide-layout">
+
+        <!-- 목차 사이드바 -->
+        <nav class="guide-toc" aria-label="목차">
+          <p class="guide-toc-title">목차</p>
+          <ul>
+            <li><a href="#g-overview">프로그램 개요</a></li>
+            <li><a href="#g-setup">설치 &amp; 초기 설정</a></li>
+            <li><a href="#g-start">매일 시작하기</a></li>
+            <li><a href="#g-nice">NEIS에서 파일 받기</a></li>
+            <li><a href="#g-upload">① 업로드 &amp; DB 구축</a></li>
+            <li><a href="#g-search">② 학생 조회</a></li>
+            <li><a href="#g-apikey">Gemini API 키 발급</a></li>
+            <li><a href="#g-inspect">③ AI 점검</a></li>
+            <li><a href="#g-results">④ 결과 확인</a></li>
+            <li><a href="#g-faq">주의사항 &amp; FAQ</a></li>
+          </ul>
+        </nav>
+
+        <!-- 본문 -->
+        <div class="guide-body">
+
+          <section class="guide-section" id="g-overview">
+            <h2 class="guide-h2">프로그램 개요</h2>
+            <p>이 프로그램은 NEIS에서 내려받은 학생부 XLS 파일을 로컬 DB에 구축한 뒤, Google Gemini AI로 세특·창체·봉사·행특 기재 내용의 <strong>규정 위반 여부를 자동 점검</strong>하는 도구입니다.</p>
+            <div class="guide-flow">
+              <div class="guide-flow-step">
+                <span class="guide-flow-num">1</span>
+                <span>NEIS에서<br>XLS 파일 6종 다운로드</span>
+              </div>
+              <div class="guide-flow-arrow">→</div>
+              <div class="guide-flow-step">
+                <span class="guide-flow-num">2</span>
+                <span>업로드 탭에서<br>파일 업로드 &amp; DB 구축</span>
+              </div>
+              <div class="guide-flow-arrow">→</div>
+              <div class="guide-flow-step">
+                <span class="guide-flow-num">3</span>
+                <span>AI 점검 탭에서<br>Gemini로 일괄 검사</span>
+              </div>
+              <div class="guide-flow-arrow">→</div>
+              <div class="guide-flow-step">
+                <span class="guide-flow-num">4</span>
+                <span>결과 확인 탭에서<br>위반 내역 Excel 출력</span>
+              </div>
+            </div>
+            <div class="guide-callout guide-callout-info">
+              <strong>원본 프로그램</strong>: 대전복수고등학교 박영준 교사 제작 &nbsp;·&nbsp; <strong>웹 서비스 제작</strong>: JINSUNG
+            </div>
+          </section>
+
+          <section class="guide-section" id="g-setup">
+            <h2 class="guide-h2">설치 &amp; 초기 설정</h2>
+            <p>GitHub에서 처음 내려받았을 때 한 번만 진행하면 됩니다.</p>
+
+            <h3 class="guide-h3">사전 준비</h3>
+            <ul class="guide-ul">
+              <li><strong>Python 3.11 이상</strong> — <code>python --version</code>으로 확인. 없으면 <code>python.org</code>에서 설치 (설치 시 <em>"Add Python to PATH"</em> 체크 필수)</li>
+              <li><strong>Git</strong> — <code>git --version</code>으로 확인. 없으면 <code>git-scm.com</code>에서 설치</li>
+            </ul>
+
+            <h3 class="guide-h3">1단계 — 저장소 클론</h3>
+            <div class="guide-codeblock">git clone https://github.com/tigerjk9/school-life-record.git<br>cd school-life-record</div>
+
+            <h3 class="guide-h3">2단계 — 가상환경 생성</h3>
+            <p class="guide-step-desc">프로젝트 폴더 안에서 아래 명령을 실행합니다.</p>
+            <div class="guide-codeblock">python -m venv .venv</div>
+
+            <h3 class="guide-h3">3단계 — 패키지 설치</h3>
+            <div class="guide-codeblock">.venv\Scripts\activate<br>pip install -r requirements.txt</div>
+            <div class="guide-callout guide-callout-info">
+              이 단계에서 FastAPI, Uvicorn, Pandas, google-generativeai 등 필요한 라이브러리가 모두 설치됩니다. 수 분 소요될 수 있습니다.
+            </div>
+
+            <h3 class="guide-h3">4단계 — 완료 확인</h3>
+            <p>설치가 끝나면 아래 구조가 갖춰진 상태입니다. 이후부터는 <strong>bat 파일만 실행</strong>하면 됩니다.</p>
+            <div class="guide-codeblock">school-life-record/<br>├── .venv/               ← 가상환경 (git 제외됨)<br>├── backend/<br>├── frontend/<br>├── requirements.txt<br>└── 생기부점검_실행.bat  ← 이것만 더블클릭</div>
+          </section>
+
+          <section class="guide-section" id="g-start">
+            <h2 class="guide-h2">매일 시작하기</h2>
+            <p>초기 설정이 완료된 이후의 일상적인 실행 방법입니다.</p>
+            <ol class="guide-ol">
+              <li>
+                프로젝트 폴더의 <strong>생기부점검_실행.bat</strong>을 더블클릭합니다.
+                <p class="guide-note">가상환경(.venv)을 자동으로 활성화하고, 백엔드 서버(포트 8000)를 실행한 뒤 브라우저를 엽니다.</p>
+              </li>
+              <li>브라우저가 자동으로 열리지 않으면 직접 <code>http://127.0.0.1:8000</code>으로 접속합니다.</li>
+              <li>프로그램 종료 시 bat 창을 닫으면 서버도 함께 종료됩니다.</li>
+            </ol>
+            <div class="guide-callout guide-callout-warn">
+              <strong>보안 주의:</strong> 이 서버는 <code>127.0.0.1</code>(내 컴퓨터 전용)로만 실행됩니다. 학생 개인정보가 담긴 서비스이므로 외부 네트워크에 절대 노출하지 마세요.
+            </div>
+          </section>
+
+          <section class="guide-section" id="g-nice">
+            <h2 class="guide-h2">NEIS에서 파일 받기</h2>
+            <p>NEIS 교육정보시스템에서 <strong>학생부 항목별 조회(출력)</strong> 메뉴를 이용합니다.</p>
+            <ol class="guide-ol">
+              <li>NEIS 로그인 → <strong>학생부</strong> 메뉴 진입</li>
+              <li><strong>학생부 항목별 조회</strong> 또는 <strong>학생부 출력</strong> 선택</li>
+              <li>학년·반·번호 범위를 지정하고 아래 5개 항목을 각각 엑셀로 내려받습니다.</li>
+            </ol>
+            <table class="guide-table">
+              <thead>
+                <tr>
+                  <th>순서</th>
+                  <th>항목명</th>
+                  <th>비고</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="guide-badge-req">① 필수</span></td>
+                  <td>교과학습발달상황</td>
+                  <td>학생 기준 정보 — 반드시 먼저 업로드</td>
+                </tr>
+                <tr>
+                  <td>②</td>
+                  <td>세부능력및특기사항</td>
+                  <td>세특 AI 점검 대상</td>
+                </tr>
+                <tr>
+                  <td>③</td>
+                  <td>창의적체험활동상황</td>
+                  <td>창체 AI 점검 대상</td>
+                </tr>
+                <tr>
+                  <td>④</td>
+                  <td>봉사활동상황</td>
+                  <td>봉사 AI 점검 대상</td>
+                </tr>
+                <tr>
+                  <td>⑤</td>
+                  <td>행동특성및종합의견</td>
+                  <td>행특 AI 점검 대상</td>
+                </tr>
+                <tr>
+                  <td>⑥</td>
+                  <td>학년반이력</td>
+                  <td>학생 학년/반 이력 보존 (선택)</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="guide-callout guide-callout-info">
+              파일 형식은 <strong>.xls 또는 .xlsx</strong> 모두 지원합니다. NEIS 기본 내보내기 형식(.xls)을 그대로 사용하면 됩니다.
+            </div>
+          </section>
+
+          <section class="guide-section" id="g-upload">
+            <h2 class="guide-h2">① 업로드 &amp; DB 구축</h2>
+            <ol class="guide-ol">
+              <li>① 교과학습발달상황 카드에 파일을 드래그하거나 클릭하여 선택합니다. <em>(필수)</em></li>
+              <li>나머지 5개 항목도 같은 방법으로 업로드합니다. <em>(선택 — 점검할 항목만 올려도 됩니다. ⑥ 학년반이력은 점검 대상 아님)</em></li>
+              <li><strong>DB 구축</strong> 버튼을 클릭합니다.</li>
+              <li>구축 완료 메시지가 나타나면 헤더의 <strong>DB 상태</strong> 뱃지가 초록으로 바뀝니다.</li>
+            </ol>
+            <div class="guide-callout guide-callout-warn">
+              DB 구축 시 기존 데이터는 백업 후 덮어씁니다. 동일 학교·동일 학년도 파일을 새로 올릴 때는 6개 파일을 모두 다시 올리는 것을 권장합니다.
+            </div>
+          </section>
+
+          <section class="guide-section" id="g-search">
+            <h2 class="guide-h2">② 학생 조회</h2>
+            <p>DB가 구축된 뒤 활성화됩니다.</p>
+            <ul class="guide-ul">
+              <li><strong>학년 / 반 / 이름</strong> 필터로 특정 학생을 검색합니다.</li>
+              <li><strong>내용 검색</strong> 란에 키워드를 입력하면 세특·창체·봉사·행특 본문을 전문 검색합니다.</li>
+              <li>학생 행을 클릭하면 해당 학생의 항목별 기재 내용을 모달로 확인할 수 있습니다.</li>
+            </ul>
+          </section>
+
+          <section class="guide-section" id="g-apikey">
+            <h2 class="guide-h2">Gemini API 키 발급</h2>
+            <p>AI 점검 기능은 Google Gemini API를 사용합니다. 아래 절차로 키를 발급받으세요.</p>
+            <ol class="guide-ol">
+              <li><strong>Google AI Studio</strong>(<code>aistudio.google.com</code>)에 접속합니다.</li>
+              <li>구글 계정으로 로그인합니다.</li>
+              <li>우측 상단의 <strong>Get API key</strong>를 클릭합니다.</li>
+              <li><strong>API 키 만들기</strong>를 선택 → 키를 생성하고 복사하여 안전한 곳에 보관합니다.</li>
+              <li><code>AIza...</code>로 시작하는 키를 복사합니다.</li>
+            </ol>
+            <div class="guide-callout guide-callout-warn">
+              <strong>유료 API 사용 강력 권장:</strong> 무료 티어보다 유료(Pay-as-you-go) 버전이 성능과 속도 면에서 훨씬 낫습니다. 무료는 분당 15회 요청(RPM) 제한이 있어 오류가 잦습니다.<br>
+              키 생성 후 Google Cloud Console에서 <strong>결제 설정 → 결제 계정 연결</strong>을 완료하면 <strong>Tier 1(분당 2,000회)</strong>로 업그레이드됩니다. 학급 규모(30명) 점검 비용은 대개 수백 원 수준입니다.
+            </div>
+            <div class="guide-callout guide-callout-info">
+              결제 계정을 연결한 뒤 Google AI Studio로 돌아와 새로고침하면 요금제가 <strong>'Tier 1 결제로 이동'</strong>으로 변경된 것을 확인할 수 있습니다.
+            </div>
+            <div class="guide-callout guide-callout-warn">
+              API 키는 외부에 노출되지 않도록 주의하세요. 이 프로그램은 키를 서버 메모리에만 임시 저장하며, 파일이나 DB에 기록하지 않습니다.
+            </div>
+          </section>
+
+          <section class="guide-section" id="g-inspect">
+            <h2 class="guide-h2">③ AI 점검</h2>
+            <ol class="guide-ol">
+              <li><strong>Gemini API 키</strong>를 입력하고 <strong>연결</strong>을 클릭합니다. 연결 상태가 초록으로 바뀌면 성공입니다.</li>
+              <li>모델 목록에서 사용할 모델을 선택합니다. <em>Pro &gt; Flash &gt; Flash Lite 순으로 성능과 가격이 높습니다. 일반 점검에는 <strong>gemini-2.5-flash</strong>를 권장합니다.</em></li>
+              <li><strong>배치 크기</strong>를 설정합니다. 기본값 3은 한 번의 API 호출에 학생 3명분을 묶어 보냅니다. 값이 작을수록 꼼꼼하지만 비용이 높고, 클수록 빠르지만 비용이 적습니다. API 오류가 잦으면 1로 낮추세요.</li>
+              <li>점검할 <strong>영역</strong>(세특·창체·봉사·행특)과 <strong>학년/반</strong>을 선택합니다. 전체 점검은 비워두면 됩니다.</li>
+              <li><strong>시스템 프롬프트</strong>를 펼쳐 AI 판단 기준을 확인하거나 수정할 수 있습니다. 수정 후 <strong>프롬프트 저장</strong>을 클릭하고, 원래대로 되돌리려면 <strong>기본값 복원</strong>을 클릭합니다.</li>
+              <li><strong>검사 시작</strong>을 클릭합니다. 진행 상황은 실시간 진행률 + <strong>남은 시간 예상</strong>과 함께 표시되며, <strong>라이브 결과</strong> 표에 위반 건이 즉시 나타납니다.</li>
+              <li>검사 중 <strong>검사 취소</strong>를 누르면 현재 배치가 끝난 후 중단됩니다.</li>
+            </ol>
+            <div class="guide-callout guide-callout-warn">
+              <strong>중요 — 학교명 변경 필수:</strong> 시스템 프롬프트 안의 <code>[학교생활기록부 9대 기재 금지 원칙]</code> 항목에 자교 이름이 기재되어 있습니다. <strong>반드시 해당 항목의 학교명을 본교 이름으로 변경</strong>한 뒤 저장하세요. 변경하지 않으면 본교명이 위반으로 오탐되거나 기준이 잘못 적용됩니다.
+            </div>
+            <div class="guide-callout guide-callout-info">
+              점검이 완료되면 <strong>결과 확인 탭</strong>에 자동으로 이력이 저장됩니다.
+            </div>
+          </section>
+
+          <section class="guide-section" id="g-results">
+            <h2 class="guide-h2">④ 결과 확인</h2>
+            <ol class="guide-ol">
+              <li><strong>검사 이력</strong> 드롭다운에서 확인할 검사 회차를 선택합니다.</li>
+              <li>상단 요약 배너에서 위반 건수·정상 건수·사용 모델을 확인합니다.</li>
+              <li><strong>필터</strong>(전체 / 위반만 / 정상만)로 결과를 걸러볼 수 있습니다.</li>
+              <li>행을 클릭하면 해당 학생의 원문, AI 판단 근거(위반 유형·사유·근거 문장), 그리고 <strong>수정 제안(After)</strong>을 확인합니다.</li>
+              <li><strong>Excel 다운로드</strong>를 클릭하면 요약·위반·정상·전체 4개 시트로 구성된 xlsx 파일을 내려받습니다.</li>
+            </ol>
+            <div class="guide-callout guide-callout-info">
+              <strong>AI 결과 활용 팁:</strong> 위반 내용을 하나씩 확인하면서 실제 수정이 필요한 항목을 선별하세요. AI가 강한 규칙으로 판단하므로 일부 오탐이 발생할 수 있습니다. 결과는 <strong>참고 용도</strong>로 사용하고 교사가 원문과 함께 최종 판단하세요.
+            </div>
+          </section>
+
+          <section class="guide-section" id="g-faq">
+            <h2 class="guide-h2">주의사항 &amp; FAQ</h2>
+
+            <div class="guide-callout guide-callout-warn">
+              <strong>사용 전 필수 체크리스트</strong><br>
+              1. 시스템 프롬프트에서 <strong>학교명을 본교 이름으로 변경</strong>했는지 확인하세요.<br>
+              2. 독서명·봉사활동 기관명이 위반으로 잡혀도 <strong>정상 동작</strong>입니다 — 하나씩 확인하세요.<br>
+              3. API 오류가 잦으면 <strong>배치 크기를 1</strong>로 낮추거나 <strong>유료 API</strong>로 전환하세요.
+            </div>
+
+            <dl class="guide-dl">
+              <dt>처음 쓸 때 학교명을 어디서 바꾸나요?</dt>
+              <dd>③ AI 점검 탭 → <strong>시스템 프롬프트</strong>를 펼쳐 텍스트 안의 학교명(예: "복수고등학교")을 본교 이름으로 수정한 뒤 <strong>프롬프트 저장</strong>을 클릭하세요. 원래대로 되돌리려면 <strong>기본값 복원</strong>을 사용합니다.</dd>
+
+              <dt>독서명이나 봉사활동 학교명이 위반으로 잡힙니다.</dt>
+              <dd>AI 규칙이 강하게 설정되어 있어 독서 제목, 봉사활동 기관명(학교명 포함) 등이 위반으로 표시되는 경우가 많습니다. 이는 정상 동작이므로 무시하세요. 위반 목록을 하나씩 확인하다 보면 실제 수정이 필요한 내용도 나옵니다.</dd>
+
+              <dt>NEIS 파일 컬럼 구조가 달라 오류가 납니다.</dt>
+              <dd>NEIS 업데이트로 컬럼명이 변경될 수 있습니다. 업로드 오류 메시지에 미매칭된 컬럼명이 표시됩니다. 개발자에게 해당 컬럼명을 전달해 파서를 업데이트하면 됩니다.</dd>
+
+              <dt>NEIS 봉사활동 XLS에 "내용" 컬럼이 없는데 점검됩니까?</dt>
+              <dd>네. 봉사는 내용이 없더라도 기관명(organization)만 있으면 점검 대상에 포함되고, AI가 기관명을 기준으로 위반 여부를 판단합니다.</dd>
+
+              <dt>API 호출 중 오류가 자주 발생합니다.</dt>
+              <dd>무료 티어의 분당 요청 한도(15 RPM) 초과가 원인일 수 있습니다. <strong>배치 크기를 1로 줄이면</strong> 호출 빈도가 낮아져 안정적으로 동작합니다. 근본적인 해결책은 Google Cloud에서 <strong>결제 계정을 연결</strong>하여 유료 티어(2,000 RPM)로 업그레이드하는 것입니다. 재시도는 지수 백오프로 자동 처리됩니다.</dd>
+
+              <dt>AI 결과가 실제 규정과 다릅니다.</dt>
+              <dd>AI는 오탐(False Positive)을 낼 수 있습니다. 결과는 <strong>참고 용도</strong>로만 사용하고, 교사가 원문과 함께 최종 판단하세요. 시스템 프롬프트를 수정해 판단 기준을 조정할 수 있으며, 편집 후 <strong>기본값 복원</strong> 버튼으로 원본 프롬프트로 되돌릴 수도 있습니다.</dd>
+
+              <dt>프로그램을 종료했다가 다시 실행하면 데이터가 사라집니다.</dt>
+              <dd>데이터는 <code>data/record.db</code> SQLite 파일에 영구 저장됩니다. 파일이 존재하면 재실행 후에도 DB 상태가 유지됩니다. 데이터를 초기화하려면 해당 파일을 삭제하세요.</dd>
+
+              <dt>학년도가 바뀌면 어떻게 합니까?</dt>
+              <dd>새 학년도 파일을 업로드하고 DB 구축을 다시 실행하면 됩니다. 이전 데이터는 <code>data/record.db.bak.{날짜}</code>로 자동 백업됩니다.</dd>
+
+              <dt>학년 일부만 점검할 수 있나요?</dt>
+              <dd>네. 예를 들어 1학년 전체를 이미 점검했다면, DB를 업데이트한 뒤 AI 점검 탭에서 <strong>학년/영역만 선택</strong>하여 추가 점검할 수 있습니다. 전체를 다시 점검할 필요 없습니다.</dd>
+            </dl>
+          </section>
+
+        </div><!-- /guide-body -->
+      </div><!-- /guide-layout -->
+    </section>
+
+    <!-- ===================== 탭 5: 통합검사 ===================== -->
+    <section id="tab-validate" class="tab-panel" role="tabpanel" aria-labelledby="validate" hidden>
+      <div class="panel-header">
+        <h2 class="panel-title">통합검사</h2>
+        <p class="panel-subtitle">글자수 검증 · 기재요령 위반(로컬) · 중복문장 · 띄어쓰기(Ollama) — 개인정보 외부 전송 없음</p>
+      </div>
+
+      <!-- ① 글자수/바이트 검증 -->
+      <div class="validate-section" id="vs-chars">
+        <div class="validate-section-head">
+          <h3 class="validate-section-title">① 글자수 · 바이트 검증</h3>
+          <span class="muted">항목별 한도 초과 여부를 즉시 확인</span>
+        </div>
+        <div class="config-card">
+          <div class="config-row">
+            <div class="config-field">
+              <label>기재요령 연도</label>
+              <select id="chars-year"><option value="2025">2025</option></select>
+            </div>
+            <div class="config-field">
+              <label>학년</label>
+              <select id="chars-grade"><option value="">전체</option><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option></select>
+            </div>
+            <div class="config-field">
+              <label>반</label>
+              <select id="chars-class"><option value="">전체</option></select>
+            </div>
+            <div class="config-actions">
+              <button class="btn btn-primary btn-md" id="btn-chars-run">검증 시작</button>
+            </div>
+          </div>
+        </div>
+        <div id="chars-result" class="validate-result" hidden></div>
+      </div>
+
+      <!-- ② 기재요령 로컬 규칙 검사 -->
+      <div class="validate-section" id="vs-rules">
+        <div class="validate-section-head">
+          <h3 class="validate-section-title">② 기재요령 위반 (로컬 규칙 DB)</h3>
+          <span class="muted">AI 없이 키워드·패턴 기반 — 완전 로컬</span>
+        </div>
+        <div class="config-card">
+          <div class="config-row">
+            <div class="config-field">
+              <label>기재요령 연도</label>
+              <select id="rules-year"><option value="2025">2025</option></select>
+            </div>
+            <div class="config-field">
+              <label>학년</label>
+              <select id="rules-grade"><option value="">전체</option><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option></select>
+            </div>
+            <div class="config-field">
+              <label>반</label>
+              <select id="rules-class"><option value="">전체</option></select>
+            </div>
+            <div class="config-field">
+              <label>영역</label>
+              <div class="checkbox-group">
+                <label class="checkbox-pill"><input type="checkbox" name="rules-area" value="subject_details" checked> 세특</label>
+                <label class="checkbox-pill"><input type="checkbox" name="rules-area" value="creative_activities" checked> 창체</label>
+                <label class="checkbox-pill"><input type="checkbox" name="rules-area" value="volunteer_activities" checked> 봉사</label>
+                <label class="checkbox-pill"><input type="checkbox" name="rules-area" value="behavior_opinion" checked> 행특</label>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button class="btn btn-primary btn-md" id="btn-rules-run">검사 시작</button>
+            </div>
+          </div>
+        </div>
+        <div id="rules-result" class="validate-result" hidden></div>
+      </div>
+
+      <!-- ③ 중복문장 검사 -->
+      <div class="validate-section" id="vs-dup">
+        <div class="validate-section-head">
+          <h3 class="validate-section-title">③ 중복문장 검사</h3>
+          <span class="muted">학생 간 유사 문장 탐지 — difflib 기반 로컬</span>
+        </div>
+        <div class="config-card">
+          <div class="config-row">
+            <div class="config-field">
+              <label>유사도 임계값</label>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input type="range" id="dup-threshold" min="50" max="95" value="70" style="flex:1;width:auto;">
+                <span id="dup-threshold-label" style="min-width:36px;font-weight:700;">70%</span>
+              </div>
+            </div>
+            <div class="config-field">
+              <label>학년</label>
+              <select id="dup-grade"><option value="">전체</option><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option></select>
+            </div>
+            <div class="config-field">
+              <label>검사 범위</label>
+              <div class="checkbox-group">
+                <label class="checkbox-pill"><input type="checkbox" id="dup-cross" checked> 학생 간</label>
+                <label class="checkbox-pill"><input type="checkbox" id="dup-within" checked> 학생 내부</label>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button class="btn btn-primary btn-md" id="btn-dup-run">검사 시작</button>
+            </div>
+          </div>
+        </div>
+        <div id="dup-result" class="validate-result" hidden></div>
+      </div>
+
+      <!-- ④ 띄어쓰기 검사 (Ollama) -->
+      <div class="validate-section" id="vs-spacing">
+        <div class="validate-section-head">
+          <h3 class="validate-section-title">④ 띄어쓰기 검사 (Ollama 로컬 LLM)</h3>
+          <span id="ollama-status-text" class="muted">Ollama 상태 확인 중…</span>
+        </div>
+        <div class="config-card">
+          <div class="config-row">
+            <div class="config-field">
+              <label>Ollama 모델</label>
+              <select id="spacing-model"><option value="">-- 모델 선택 --</option></select>
+            </div>
+            <div class="config-field">
+              <label>학년</label>
+              <select id="spacing-grade"><option value="">전체</option><option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option></select>
+            </div>
+            <div class="config-field">
+              <label>반</label>
+              <select id="spacing-class"><option value="">전체</option></select>
+            </div>
+            <div class="config-field">
+              <label>영역</label>
+              <div class="checkbox-group">
+                <label class="checkbox-pill"><input type="checkbox" name="spacing-area" value="subject_details" checked> 세특</label>
+                <label class="checkbox-pill"><input type="checkbox" name="spacing-area" value="creative_activities" checked> 창체</label>
+                <label class="checkbox-pill"><input type="checkbox" name="spacing-area" value="behavior_opinion" checked> 행특</label>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button class="btn btn-primary btn-md" id="btn-spacing-run" disabled>검사 시작</button>
+            </div>
+          </div>
+        </div>
+        <div id="spacing-result" class="validate-result" hidden></div>
+      </div>
+
+      <!-- ⑤ 기재요령 규칙 업데이트 -->
+      <div class="validate-section" id="vs-update">
+        <div class="validate-section-head">
+          <h3 class="validate-section-title">⑤ 기재요령 규칙 업데이트</h3>
+          <span class="muted">GitHub에서 연도별 규칙 JSON을 내려받아 적용</span>
+        </div>
+        <div class="config-card">
+          <div id="rules-list-info" class="info-banner" style="margin-bottom:var(--space-3);">규칙 파일 로딩 중…</div>
+          <div class="config-row">
+            <div class="config-field config-field-grow">
+              <label>GitHub Raw URL (violations 또는 limits JSON)</label>
+              <input type="text" id="rules-update-url" placeholder="https://raw.githubusercontent.com/user/repo/main/violations_2026.json">
+            </div>
+            <div class="config-field">
+              <label>유형</label>
+              <select id="rules-update-type">
+                <option value="violations">기재요령 위반 규칙</option>
+                <option value="limits">글자수 한도</option>
+              </select>
+            </div>
+            <div class="config-actions">
+              <button class="btn btn-secondary btn-md" id="btn-rules-update">업데이트</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- 공용 모달 -->
+  <div id="modal-overlay" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h3 id="modal-title" class="modal-title">상세</h3>
+        <button id="modal-close" class="modal-close" aria-label="닫기">×</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- 토스트 -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="app.js?v=10"></script>
+</body>
+</html>

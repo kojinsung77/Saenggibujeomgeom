@@ -1,0 +1,27 @@
+{
+  "year": 2025,
+  "source": "교육부 학교생활기록부 기재요령 2025",
+  "updated": "2025-03-01",
+  "areas": {
+    "subject_details": {
+      "chars": 500,
+      "bytes": null,
+      "note": "교과별 세부능력및특기사항 (과목당, 1·2학기 합산)"
+    },
+    "creative_activities": {
+      "chars": 500,
+      "bytes": null,
+      "note": "창의적체험활동 (영역별)"
+    },
+    "behavior_opinion": {
+      "chars": 500,
+      "bytes": null,
+      "note": "행동특성및종합의견 (학년당)"
+    },
+    "volunteer_activities": {
+      "chars": null,
+      "bytes": null,
+      "note": "글자수 제한 없음"
+    }
+  }
+}
