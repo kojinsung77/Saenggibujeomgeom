@@ -43,16 +43,23 @@ class DuplicateCheckRequest(BaseModel):
     within_student: bool = True
 
 
+# 띄어쓰기 검사: 한 번에 처리할 최대 레코드 수 (서버 점거 방지)
+SPACING_MAX_RECORDS = 200
+# 전체 엔드포인트 최대 허용 시간 (초)
+SPACING_TOTAL_TIMEOUT = 600  # 10분
+
+
 class SpacingRequest(BaseModel):
     model: str
     student_ids: Optional[list[int]] = None
     areas: Optional[list[str]] = None
     grade: Optional[int] = None
     class_no: Optional[int] = None
+    max_records: Optional[int] = None  # None이면 SPACING_MAX_RECORDS 적용
 
 
 class RuleUpdateRequest(BaseModel):
-    github_raw_url: str  # e.g. https://raw.githubusercontent.com/user/repo/main/violations_2026.json
+    github_raw_url: str
     rule_type: str = "violations"  # "violations" | "limits"
 
 
@@ -99,6 +106,8 @@ async def check_duplicates(req: DuplicateCheckRequest) -> dict[str, Any]:
 async def check_spacing(req: SpacingRequest) -> dict[str, Any]:
     if not ollama_service.is_available():
         raise HTTPException(503, "Ollama가 실행 중이지 않습니다. 'ollama serve'를 먼저 실행하세요.")
+
+    limit = min(req.max_records or SPACING_MAX_RECORDS, SPACING_MAX_RECORDS)
 
     from backend.database import get_connection
     conn = get_connection()
@@ -173,33 +182,51 @@ async def check_spacing(req: SpacingRequest) -> dict[str, Any]:
     finally:
         conn.close()
 
+    # 레코드 수 제한 적용 (서버 점거 방지)
+    total_in_db = len(records)
+    records = records[:limit]
+    if total_in_db > limit:
+        logger.warning("[validate/spacing] 레코드 %d개 중 %d개만 검사 (최대 %d개 제한)",
+                       total_in_db, limit, limit)
+
     results: list[dict[str, Any]] = []
     model = req.model
+    error_count_total = 0
 
-    for rec in records:
-        try:
-            check_result = await asyncio.to_thread(
-                ollama_service.check_spacing, rec["content"], model
-            )
-        except ConnectionError as e:
-            raise HTTPException(503, str(e)) from e
-        except Exception as e:
-            logger.warning("[validate/spacing] record_id=%s 실패: %s", rec["record_id"], e)
-            check_result = {"errors": [], "corrected_text": rec["content"], "error_count": 0}
+    async def _run_all() -> None:
+        nonlocal error_count_total
+        for rec in records:
+            try:
+                check_result = await asyncio.to_thread(
+                    ollama_service.check_spacing, rec["content"], model
+                )
+            except ConnectionError as e:
+                raise HTTPException(503, str(e)) from e
+            except Exception as e:
+                logger.warning("[validate/spacing] record_id=%s 실패: %s", rec["record_id"], e)
+                check_result = {"errors": [], "corrected_text": rec["content"], "error_count": 0}
 
-        results.append({
-            **{k: rec[k] for k in ["record_id", "student_id", "student_name",
-                                    "grade", "class_no", "number", "area",
-                                    "area_label", "label"]},
-            "error_count": check_result.get("error_count", 0),
-            "errors": check_result.get("errors", []),
-            "corrected_text": check_result.get("corrected_text", rec["content"]),
-        })
+            results.append({
+                **{k: rec[k] for k in ["record_id", "student_id", "student_name",
+                                        "grade", "class_no", "number", "area",
+                                        "area_label", "label"]},
+                "error_count": check_result.get("error_count", 0),
+                "errors": check_result.get("errors", []),
+                "corrected_text": check_result.get("corrected_text", rec["content"]),
+            })
+            error_count_total += check_result.get("error_count", 0)
 
-    total_errors = sum(r["error_count"] for r in results)
+    try:
+        await asyncio.wait_for(_run_all(), timeout=float(SPACING_TOTAL_TIMEOUT))
+    except asyncio.TimeoutError:
+        logger.warning("[validate/spacing] 전체 타임아웃 (%ds) - 처리된 %d/%d건 반환",
+                       SPACING_TOTAL_TIMEOUT, len(results), len(records))
+
     return {
         "total_records": len(results),
-        "total_errors": total_errors,
+        "total_in_db": total_in_db,
+        "limit_applied": total_in_db > limit,
+        "total_errors": error_count_total,
         "model": model,
         "results": results,
     }
@@ -248,11 +275,18 @@ def _list_limits() -> list[dict[str, Any]]:
 MAX_RULE_SIZE = 500_000  # 500KB
 
 
+_ALLOWED_RULE_HOSTS = {"raw.githubusercontent.com", "github.com"}
+
+
 @router.post("/rules/update")
 async def update_rules(req: RuleUpdateRequest) -> dict[str, Any]:
+    import urllib.parse
     url = req.github_raw_url.strip()
     if not url.startswith("https://"):
         raise HTTPException(400, "https:// URL만 허용됩니다")
+    parsed_url = urllib.parse.urlparse(url)
+    if parsed_url.hostname not in _ALLOWED_RULE_HOSTS:
+        raise HTTPException(400, "github.com 또는 raw.githubusercontent.com URL만 허용됩니다")
 
     def _fetch() -> bytes:
         try:
@@ -286,7 +320,7 @@ async def update_rules(req: RuleUpdateRequest) -> dict[str, Any]:
     save_path = RULES_DIR / f"{rule_type}_{year}.json"
     save_path.write_bytes(raw)
 
-    logger.info("[rules/update] %s 저장 완료", save_path)
+    logger.info("[rules/update] %s 저장 완료", save_path.name)
     return {
         "ok": True,
         "saved": str(save_path.name),

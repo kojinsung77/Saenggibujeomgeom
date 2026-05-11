@@ -1,4 +1,4 @@
-"""Google Gemini 호출 래퍼."""
+"""Google Gemini 호출 래퍼 (google-genai SDK v1 사용)."""
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +6,8 @@ import json
 import logging
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 logger = logging.getLogger(__name__)
@@ -14,18 +15,20 @@ logger = logging.getLogger(__name__)
 
 async def connect_and_list_models(api_key: str) -> list[str]:
     """API 키 검증 + 사용 가능한 generateContent 모델 목록 반환."""
-    genai.configure(api_key=api_key)
-    models = await asyncio.to_thread(lambda: list(genai.list_models()))
+    client = genai.Client(api_key=api_key)
+    models = await asyncio.to_thread(lambda: list(client.models.list()))
+    # 텍스트 생성에 부적합한 모델 키워드 (TTS, 이미지생성, 컴퓨터비전 등)
+    _EXCLUDE = ("tts", "image", "computer-use", "embedding", "aqa", "audio")
     out: list[str] = []
     for m in models:
         name = getattr(m, "name", "") or ""
-        methods = getattr(m, "supported_generation_methods", []) or []
-        if "generateContent" not in methods:
+        short = name.replace("models/", "")
+        # gemini- 계열 모델만 포함 (타 제품군 제외)
+        if not short.startswith("gemini-"):
             continue
-        # gemini-2.x 만 노출
-        if "gemini-2" in name or "gemini-1.5" in name:
-            out.append(name)
-    # 보기 편하게 정렬
+        if any(kw in short.lower() for kw in _EXCLUDE):
+            continue
+        out.append(short)
     out.sort()
     return out
 
@@ -44,19 +47,18 @@ async def inspect_batch(
         - content (str)
         - subject (str | None)
     """
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
-    # 모델명은 'models/' prefix 가 있을 수 있음 → 그대로 전달 가능.
-    model = genai.GenerativeModel(
-        model_name=model_name,
-        system_instruction=system_prompt,
-    )
+    # 모델명에 'models/' prefix 가 있으면 제거 (신규 SDK는 prefix 없이 사용)
+    clean_model = model_name.replace("models/", "")
 
     records_text_parts = []
     for r in records:
         subject = r.get("subject") or ""
+        grade_year = r.get("grade_year")
+        year_tag = f"|{grade_year}학년기록" if grade_year else ""
         records_text_parts.append(
-            f"[ID:{r['record_id']}|영역:{r['area']}|과목:{subject}]\n{r['content']}"
+            f"[ID:{r['record_id']}|영역:{r['area']}|과목:{subject}{year_tag}]\n{r['content']}"
         )
     records_text = "\n\n".join(records_text_parts)
 
@@ -72,20 +74,23 @@ async def inspect_batch(
         '"suggested_text": "특정 기업과 협력하여 프로젝트를 진행함"}]'
     )
 
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        temperature=0.1,
+    )
+
     last_err: Exception | None = None
     for attempt in range(3):
         try:
             response = await asyncio.to_thread(
-                model.generate_content,
-                user_prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1,
-                ),
+                client.models.generate_content,
+                model=clean_model,
+                contents=user_prompt,
+                config=config,
             )
             text = getattr(response, "text", None)
             if text is None:
-                # 일부 SDK 버전 fallback
                 try:
                     text = response.candidates[0].content.parts[0].text
                 except Exception:

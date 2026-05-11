@@ -157,8 +157,6 @@ def read_with_header_autodetect(
             sub = df.iloc[0]
             rename: dict[str, str] = {}
             for col in df.columns:
-                if not col.startswith("Unnamed:"):
-                    continue
                 v = sub[col]
                 if v is None:
                     continue
@@ -168,8 +166,19 @@ def read_with_header_autodetect(
                 except Exception:
                     pass
                 s = str(v).strip()
-                if s and s != "nan" and len(s) <= 20:
+                if not s or s == "nan" or len(s) > 20:
+                    continue
+                if col.startswith("Unnamed:"):
                     rename[col] = s
+                else:
+                    # 명명된 컬럼도 서브헤더 값이 COLUMN_MAP 후보와 일치하면 교체
+                    # (예: '창의적체험활동' → '영역' for 창체 이중헤더)
+                    sn = _norm(s)
+                    if sn != _norm(col):
+                        for cands in COLUMN_MAPS.values():
+                            if any(_norm(c) == sn for c in cands):
+                                rename[col] = s
+                                break
             if rename:
                 df = df.rename(columns=rename)
                 logger.info("[xls_parser] 이중헤더 탐지 — 서브헤더 행에서 컬럼명 보완: %s", list(rename.values()))
@@ -292,11 +301,32 @@ def _iter_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
     return df.to_dict("records")
 
 
+def _merge_continuations(
+    rows: list[dict[str, Any]],
+    key_fields: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    """같은 key의 레코드를 순서 유지하며 content를 연결(페이지 분리 복원)."""
+    seen: dict[tuple, int] = {}
+    merged: list[dict[str, Any]] = []
+    for row in rows:
+        key = tuple(str(row.get(f) if row.get(f) is not None else "") for f in key_fields)
+        if key in seen:
+            idx = seen[key]
+            prev = (merged[idx].get("content") or "").rstrip()
+            cur = (row.get("content") or "").lstrip()
+            merged[idx]["content"] = prev + (" " if prev and cur else "") + cur
+        else:
+            seen[key] = len(merged)
+            merged.append(dict(row))
+    return merged
+
+
 def _parse_generic(
     path: str | Path,
     *,
     area: str,
     extra_keys: tuple[str, ...] = (),
+    ffill_extra: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """공통 파싱: header 자동탐지 → 정규화 → 행별 dict 변환.
 
@@ -316,7 +346,7 @@ def _parse_generic(
     # NEIS XLS는 번호·성명이 병합 셀로 돼 있어 첫 행만 값이 있고
     # 이후 행은 NaN이 된다. forward-fill 로 빈 칸을 채워 파싱 누락을 방지한다.
     # grade/class_no 는 fallback_grade/fallback_class 로 채우므로 ffill 제외.
-    for col in ("number", "name"):
+    for col in ("number", "name") + ffill_extra:
         if col in df.columns:
             df[col] = df[col].ffill()
 
@@ -407,6 +437,7 @@ def parse_subject_details(path: str | Path) -> dict[str, Any]:
         path,
         area="subject_details",
         extra_keys=("subject", "content", "semester", "grade_year"),
+        ffill_extra=("grade_year",),
     )
     norm_rows = []
     for r in res["rows"]:
@@ -423,6 +454,8 @@ def parse_subject_details(path: str | Path) -> dict[str, Any]:
             "semester": _to_int(r.get("semester")),
             "grade_year": _to_int(r.get("grade_year")) or r["grade"],
         })
+    # NEIS 인쇄 페이지 분리로 한 레코드가 여러 행으로 나뉘는 경우 병합
+    norm_rows = _merge_continuations(norm_rows, ("number", "name", "grade_year", "subject"))
     res["rows"] = norm_rows
     return res
 
@@ -433,22 +466,31 @@ def parse_creative(path: str | Path) -> dict[str, Any]:
         path,
         area="creative_activities",
         extra_keys=("area", "content", "hours", "grade_year"),
+        # grade_year·area ffill: NEIS 창체는 이중헤더+인쇄 페이지 분리로
+        # 연속 행에 학년·영역이 생략되므로 앞 행에서 전파한다.
+        ffill_extra=("grade_year", "area"),
     )
     norm_rows = []
     for r in res["rows"]:
         content = _to_str(r.get("content"))
         if not content:
             continue
+        area_val = _to_str(r.get("area"))
+        # 헤더/서브헤더 행이 ffill로 전파된 메타 텍스트를 area 값으로 갖는 경우 제외
+        if area_val in ("영역", "활동영역", "창의적체험활동"):
+            area_val = None
         norm_rows.append({
             "grade": r["grade"],
             "class_no": r["class_no"],
             "number": r["number"],
             "name": r["name"],
-            "area": _to_str(r.get("area")),
+            "area": area_val,
             "content": content,
             "hours": _to_float(r.get("hours")),
             "grade_year": _to_int(r.get("grade_year")) or r["grade"],
         })
+    # NEIS 인쇄 페이지 분리로 한 영역 레코드가 여러 행으로 나뉘는 경우 병합
+    norm_rows = _merge_continuations(norm_rows, ("number", "name", "grade_year", "area"))
     res["rows"] = norm_rows
     return res
 
@@ -459,6 +501,7 @@ def parse_volunteer(path: str | Path) -> dict[str, Any]:
         path,
         area="volunteer_activities",
         extra_keys=("organization", "content", "hours", "date", "grade_year"),
+        ffill_extra=("grade_year",),
     )
     norm_rows = []
     for r in res["rows"]:
@@ -483,6 +526,7 @@ def parse_behavior(path: str | Path) -> dict[str, Any]:
         path,
         area="behavior_opinion",
         extra_keys=("content", "grade_year"),
+        ffill_extra=("grade_year",),
     )
     norm_rows = []
     for r in res["rows"]:
@@ -497,6 +541,8 @@ def parse_behavior(path: str | Path) -> dict[str, Any]:
             "content": content,
             "grade_year": _to_int(r.get("grade_year")) or r["grade"],
         })
+    # NEIS 인쇄 페이지 분리로 한 학생 행특이 여러 행으로 나뉘는 경우 병합
+    norm_rows = _merge_continuations(norm_rows, ("number", "name", "grade_year"))
     res["rows"] = norm_rows
     return res
 

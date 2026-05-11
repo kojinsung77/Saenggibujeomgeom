@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import API_KEY_FILE, FRONTEND_DIR, LOG_DIR, UPLOAD_DIR
+from backend.config import API_KEY_FILE, DB_PATH, FRONTEND_DIR, LOG_DIR, UPLOAD_DIR
 from backend.database import init_db
 from backend.routers import export, inspect, students, upload, validate
 from backend import state
@@ -55,6 +55,21 @@ def _cleanup_upload_dir() -> None:
         logging.getLogger(__name__).info("[startup] 임시 파일 %d개 삭제", deleted)
 
 
+def _cleanup_db_backups(keep_days: int = 7) -> None:
+    """7일 이상 지난 DB 백업 파일 삭제."""
+    cutoff = time.time() - keep_days * 86400
+    deleted = 0
+    for f in DB_PATH.parent.glob(f"{DB_PATH.name}.bak.*"):
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+                deleted += 1
+        except OSError:
+            pass
+    if deleted:
+        logging.getLogger(__name__).info("[startup] 오래된 DB 백업 %d개 삭제", deleted)
+
+
 def _restore_api_key() -> None:
     """저장된 API 키가 있으면 복원."""
     try:
@@ -73,6 +88,7 @@ async def lifespan(app: FastAPI):
     _configure_logging()
     init_db()
     _cleanup_upload_dir()
+    _cleanup_db_backups()
     _restore_api_key()
     logging.getLogger(__name__).info("Application startup complete")
     yield
@@ -99,6 +115,24 @@ app.include_router(validate.router)
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+
+@app.get("/debug/paths")
+def debug_paths():
+    import sys
+    from backend.config import APP_DIR, BUNDLE_DIR, RULES_DIR, FRONTEND_DIR, DB_PATH
+    rules_files = sorted(p.name for p in RULES_DIR.glob("*.json")) if RULES_DIR.exists() else []
+    return {
+        "frozen": getattr(sys, "frozen", False),
+        "bundle_dir": str(BUNDLE_DIR),
+        "app_dir": str(APP_DIR),
+        "rules_dir": str(RULES_DIR),
+        "rules_dir_exists": RULES_DIR.exists(),
+        "rules_files": rules_files,
+        "frontend_dir": str(FRONTEND_DIR),
+        "frontend_dir_exists": FRONTEND_DIR.exists(),
+        "db_path": str(DB_PATH),
+    }
 
 
 # 2) 정적 파일 마운트 (마지막)
