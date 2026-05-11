@@ -343,6 +343,15 @@ def _parse_generic(
     else:
         logger.warning("[xls_parser:%s] 학년/반 추출 실패 — fallback 없음. 데이터 행에 학년/반 컬럼이 있어야 합니다.", area)
 
+    # NEIS XLS는 각 인쇄 페이지마다 "번 호 / 성 명 / 학 년 / 학 기" 컬럼 헤더 행을 반복한다.
+    # 이 행의 grade_year·semester 셀에 "학 년"·"학 기" 같은 문자열이 들어가 ffill 체인을 끊는다.
+    # ffill 전에 정수로 파싱 불가능한 값을 NaN으로 교체한다.
+    for _int_col in ("grade_year", "semester"):
+        if _int_col in df.columns:
+            df[_int_col] = df[_int_col].apply(
+                lambda v: v if _to_int(v) is not None else None
+            )
+
     # NEIS XLS는 번호·성명이 병합 셀로 돼 있어 첫 행만 값이 있고
     # 이후 행은 NaN이 된다. forward-fill 로 빈 칸을 채워 파싱 누락을 방지한다.
     # grade/class_no 는 fallback_grade/fallback_class 로 채우므로 ffill 제외.
@@ -403,6 +412,7 @@ def parse_subject_grades(path: str | Path) -> dict[str, Any]:
         path,
         area="subject_grades",
         extra_keys=("subject", "original_score", "achievement", "rank_grade", "semester", "grade_year"),
+        ffill_extra=("grade_year", "semester"),
     )
     norm_rows = []
     for r in res["rows"]:
